@@ -5,20 +5,24 @@
 # Features real-time physics, sprite animation, and high score persistence.
 #
 # Authors:          Amey Thakur & Mega Satish
-# Date:             June 30, 2021
+# Modified by:      Han Zhang
+# Date:             January 28, 2026
 # License:          MIT License
 # Repository:       https://github.com/Amey-Thakur/FLAPPY-BIRD-USING-PYGAME
 # Profiles:
 #   - Amey Thakur:  https://github.com/Amey-Thakur
 #   - Mega Satish:  https://github.com/msatmod
 # ============================================================================
-# title: AMEY & MEGA
+# title: Flappy Bird
 # icon: favicon.png
 
-import asyncio  # Asynchronous I/O for WebAssembly compatibility
 import pygame
 import sys
 import random
+import csv
+import time
+import os
+from datetime import datetime
 
 # ============================================================================
 # GLOBAL CONFIGURATION
@@ -51,10 +55,10 @@ def draw_floor():
     # Content and Colors
     # Text structure: [ ("Text", (R, G, B)) ]
     text_parts = [
-        ("Developed by ", (255, 255, 255)),           # White
-        ("Amey Thakur ", (85, 172, 238)),             # Sky Blue
-        ("& ", (255, 255, 255)),                      # White
-        ("Mega Satish", (85, 172, 238))               # Sky Blue
+    #     ("Developed by ", (255, 255, 255)),           # White
+    #     ("Amey Thakur ", (85, 172, 238)),             # Sky Blue
+    #     ("& ", (255, 255, 255)),                      # White
+    #     ("Mega Satish", (85, 172, 238))               # Sky Blue
     ]
 
     # Calculate Total Width for Centering
@@ -146,18 +150,22 @@ def draw_pipes(pipes):
             screen.blit(flip_pipe, pipe)
 
 
-def check_collision(pipes):
+def check_collision(pipes, attempt_id, logger):
     """
     Performs Axis-Aligned Bounding Box (AABB) collision detection.
     
     Parameters:
         pipes (list): List of obstacle rectangles.
+        attempt_id (int): Unique identifier for the attempt
+        logger (EventLogger): Event logger for collision events.
         
     Returns:
-        bool: False if collision detected (Game Over), True otherwise.
+        tuple: (bool, str) - (False if collision detected, collision_type)
+                Returns (True, None) if no collision.
         
     Side Effects:
         Plays `death_sound` upon collision detection.
+        Logs collision event.
     """
     global game_active
     
@@ -166,16 +174,20 @@ def check_collision(pipes):
         if bird_rectangle.colliderect(pipe):
             if game_active:
                 death_sound.play()
-            return False
+                logger.log_collision(attempt_id, 'pipe')
+                game_active = False
+            return False, 'pipe'
 
     # 2. Environmental Collision (Floor/Ceiling)
     # Thresholds: -100 (Ceiling buffer), 900 (Floor Y-coordinate)
     if bird_rectangle.top <= -100 or bird_rectangle.bottom >= 900:
         if game_active:
              death_sound.play()
-        return False
+             logger.log_collision(attempt_id, 'boundary')
+             game_active = False
+        return False, 'boundary'
 
-    return True
+    return True, None
 
 
 def rotate_bird(bird):
@@ -240,6 +252,116 @@ def update_score(current_score, current_high_score):
 
 
 # ============================================================================
+# EVENT LOGGING SYSTEM
+# ============================================================================
+
+class EventLogger:
+    """
+    Records game events with timestamps to a CSV file.
+    
+    Tracks:
+    - Trial start/end
+    - Collisions
+    - Pipe passages
+    - Key presses
+    """
+    
+    def __init__(self, filename=None):
+        """
+        Initialize the event logger.
+        
+        Parameters:
+            filename (str): Optional CSV filename. If None, generates timestamped filename.
+        """
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"data/game_events_{timestamp}.csv"
+        
+        self.filename = filename
+        self.attempt_id = 0
+        self.csv_file = None
+        self.writer = None
+        self.game_start_time = time.time()  # For ms_since_start
+        
+        # Create CSV file with headers
+        try:
+            self.csv_file = open(self.filename, 'w', newline='', encoding='utf-8')
+            self.writer = csv.writer(self.csv_file)
+            self.writer.writerow(['datetime', 'timestamp', 'attempt_id', 'event', 'additional_info'])
+            self.csv_file.flush()  # Ensure headers are written immediately
+            print(f"Event logging initialized: {self.filename}")
+        except Exception as e:
+            print(f"Warning: Could not initialize event logger ({e})")
+            self.csv_file = None
+            self.writer = None
+    
+    def log_event(self, event, attempt_id, additional_info=None):
+        """
+        Log an event with current timestamp.
+        
+        Parameters:
+            event (str): Type of event (e.g., 'TRIAL_START', 'COLLISION', etc.)
+            attempt_id (int): Unique identifier for the attempt
+            additional_info (str): Optional additional information about the event
+        """
+        if self.writer is None:
+            return
+        
+        try:
+            dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            timestamp = int((time.time() - self.game_start_time) * 1000)
+            self.writer.writerow([
+                dt,
+                timestamp,
+                attempt_id,
+                event,
+                additional_info if additional_info else ''
+            ])
+            self.csv_file.flush()  # Write immediately to prevent data loss
+        except Exception as e:
+            print(f"Warning: Failed to log event ({e})")
+    
+    def log_collision(self, attempt_id, collision_type):
+        """
+        Log a collision event.
+        
+        Parameters:
+            attempt_id (int): Unique identifier for the attempt
+            collision_type (str): Type of collision ('pipe' or 'boundary')
+        """
+        self.log_event('COLLISION', attempt_id, additional_info=collision_type)
+    
+    def log_pipe_passed(self, attempt_id, score):
+        """
+        Log when bird passes through a pipe.
+        
+        Parameters:
+            attempt_id (int): Unique identifier for the attempt
+            score (int): Current score
+        """
+        self.log_event('PIPE_PASSED', attempt_id, additional_info=score)
+    
+    def log_key_press(self, attempt_id, key_name):
+        """
+        Log a key press event.
+        
+        Parameters:
+            attempt_id (int): Unique identifier for the attempt
+            key_name (str): Name of the key pressed
+        """
+        self.log_event('KEY_PRESS', attempt_id, additional_info=key_name)
+
+    def close(self):
+        """Close the CSV file and finalize logging."""
+        if self.csv_file:
+            try:
+                self.csv_file.close()
+                print(f"Event logging completed: {self.filename}")
+            except Exception as e:
+                print(f"Warning: Error closing event logger ({e})")
+
+
+# ============================================================================
 # INITIALIZATION
 # ============================================================================
 
@@ -249,7 +371,7 @@ pygame.init()
 
 # Display Setup
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("AMEY & MEGA")
+pygame.display.set_caption("Flappy Bird")
 
 # Icon Setup
 try:
@@ -275,7 +397,7 @@ except:
     game_font = pygame.font.SysFont('Arial', 40, bold=True)
     footer_font = pygame.font.SysFont('Arial', 20, bold=True)
 bird_movement       = 0
-game_active         = True
+game_active         = False
 score               = 0
 high_score          = 0
 floor_x_position    = 0
@@ -351,23 +473,34 @@ pygame.time.set_timer(BIRDFLAP, 200)
 
 
 # ============================================================================
-# MAIN LOOP (ASYNC)
+# MAIN LOOP
 # ============================================================================
-async def main():
+def main():
     """
-    The main game loop, utilizing asyncio for browser compatibility.
+    The main game loop.
     Handles events, updates game state, and renders the frame.
     """
     global bird_movement, game_active, score, high_score, bird_index, bird_surface, bird_rectangle, pipe_list, floor_x_position
-
+    
+    # Initialize event logger
+    logger = EventLogger()
+    
     while True:
         # Event Handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                # Log trial end if game was active
+                if game_active:
+                    logger.log_trial_end(logger.attempt_id, score)
+                logger.close()
                 pygame.quit()
                 sys.exit()
 
             if event.type == pygame.KEYDOWN:
+                # Log all key presses
+                key_name = pygame.key.name(event.key).upper()
+                logger.log_key_press(logger.attempt_id, key_name)
+                
                 # Flap Mechanic
                 if event.key == pygame.K_SPACE and game_active:
                     bird_movement = 0
@@ -382,8 +515,12 @@ async def main():
                     bird_movement       = 0
                     score               = 0
                     score_sound_countdown = 100
+                    logger.attempt_id += 1
 
             if event.type == pygame.MOUSEBUTTONDOWN:
+                # Log mouse clicks as key presses
+                logger.log_key_press(logger.attempt_id, 'MOUSE_CLICK')
+                
                 # Flap Mechanic (Mouse)
                 if game_active:
                     bird_movement = 0
@@ -398,7 +535,8 @@ async def main():
                     bird_movement       = 0
                     score               = 0
                     score_sound_countdown = 100
-
+                    logger.attempt_id += 1
+                    
             if event.type == SPAWNPIPE:
                 pipe_list.extend(create_pipe())
 
@@ -414,7 +552,7 @@ async def main():
 
         if game_active:
             # --- Active Gameplay State ---
-            
+
             # 1. Physics: Apply Gravity
             bird_movement += GRAVITY
             
@@ -424,7 +562,8 @@ async def main():
             screen.blit(rotated_bird, bird_rectangle)
             
             # 3. Collision Detection
-            game_active = check_collision(pipe_list)
+            collision_result, collision_type = check_collision(pipe_list, logger.attempt_id, logger)
+            game_active = collision_result
 
             # 4. Obstacle Update
             pipe_list = move_pipes(pipe_list)
@@ -437,6 +576,7 @@ async def main():
                     score += 0.5 
                     if score % 1 == 0:
                         score_sound.play()
+                        logger.log_pipe_passed(logger.attempt_id, score)
             
             score_display('main_game')
             
@@ -456,7 +596,6 @@ async def main():
         # Frame Update
         pygame.display.update()
         clock.tick(FPS)
-        await asyncio.sleep(0)  # Critical yield for WebAssembly environment
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
