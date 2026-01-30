@@ -21,7 +21,6 @@ import sys
 import random
 import csv
 import time
-import os
 from datetime import datetime
 
 # ============================================================================
@@ -150,14 +149,12 @@ def draw_pipes(pipes):
             screen.blit(flip_pipe, pipe)
 
 
-def check_collision(pipes, attempt_id, logger):
+def check_collision(pipes):
     """
     Performs Axis-Aligned Bounding Box (AABB) collision detection.
     
     Parameters:
         pipes (list): List of obstacle rectangles.
-        attempt_id (int): Unique identifier for the attempt
-        logger (EventLogger): Event logger for collision events.
         
     Returns:
         tuple: (bool, str) - (False if collision detected, collision_type)
@@ -165,7 +162,6 @@ def check_collision(pipes, attempt_id, logger):
         
     Side Effects:
         Plays `death_sound` upon collision detection.
-        Logs collision event.
     """
     global game_active
     
@@ -174,18 +170,23 @@ def check_collision(pipes, attempt_id, logger):
         if bird_rectangle.colliderect(pipe):
             if game_active:
                 death_sound.play()
-                logger.log_collision(attempt_id, 'pipe')
                 game_active = False
             return False, 'pipe'
 
     # 2. Environmental Collision (Floor/Ceiling)
     # Thresholds: -100 (Ceiling buffer), 900 (Floor Y-coordinate)
-    if bird_rectangle.top <= -100 or bird_rectangle.bottom >= 900:
+    # Ceiling Collision
+    if bird_rectangle.top <= -100: 
         if game_active:
              death_sound.play()
-             logger.log_collision(attempt_id, 'boundary')
              game_active = False
-        return False, 'boundary'
+        return False, 'ceiling'
+    # Floor Collision
+    if bird_rectangle.bottom >= 900:
+        if game_active:
+             death_sound.play()
+             game_active = False
+        return False, 'floor'
 
     return True, None
 
@@ -244,6 +245,176 @@ def score_display(game_state):
         screen.blit(high_score_surface, high_score_rectangle)
 
 
+def debug_event_display(logger, display_duration_ms=1000):
+    """
+    Render the most recently logged event in the top-left corner for a short time.
+    Intended purely for debugging/inspection while playing.
+    """
+    if logger is None or logger.last_event_message is None:
+        return
+
+    # Compute how long ago the last event was logged
+    now_ms = int((time.time() - logger.game_start_time) * 1000)
+    if now_ms - logger.last_event_timestamp > display_duration_ms:
+        return
+
+    # Prepare text surface
+    text_surface = footer_font.render(logger.last_event_message, True, (255, 255, 0))
+    text_rect = text_surface.get_rect(topleft=(10, 10))
+
+    # Draw a simple background box for readability
+    bg_rect = text_rect.inflate(10, 6)
+    pygame.draw.rect(screen, (0, 0, 0), bg_rect)
+
+    # Blit text on top
+    screen.blit(text_surface, text_rect)
+
+
+def wrap_text(text, font, max_width):
+    """
+    Simple word-wrap helper.
+    Splits `text` into a list of lines that fit within `max_width`.
+    """
+    words = text.split(" ")
+    lines = []
+    current_line = ""
+
+    for word in words:
+        test_line = word if current_line == "" else current_line + " " + word
+        if font.size(test_line)[0] <= max_width:
+            current_line = test_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines
+
+
+def collect_session_metadata():
+    """
+    Display a simple dialog at the beginning of the game to collect:
+      - Subject ID
+      - Simulator run
+      - Comments
+    Returns a tuple (subject_id, simulator_run, comments).
+    """
+    fields = [
+        {"label": "Subject ID", "value": ""},
+        {"label": "Simulator run", "value": ""},
+        {"label": "Comments", "value": ""},
+    ]
+    current_field = 0
+    done = False
+
+    while not done:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if event.type == pygame.KEYDOWN:
+                # Navigate between fields
+                if event.key == pygame.K_TAB:
+                    current_field = (current_field + 1) % len(fields)
+                elif event.key == pygame.K_RETURN:
+                    # Enter moves to next field, or finishes on last field
+                    if current_field < len(fields) - 1:
+                        current_field += 1
+                    else:
+                        done = True
+                elif event.key == pygame.K_ESCAPE:
+                    # Allow escape to skip (leave fields as-is)
+                    done = True
+                elif event.key == pygame.K_BACKSPACE:
+                    value = fields[current_field]["value"]
+                    fields[current_field]["value"] = value[:-1]
+                else:
+                    # Append printable characters
+                    char = event.unicode
+                    if char and char.isprintable():
+                        # Modest length limit to avoid overflow; comments can be a bit longer
+                        max_len = 24 if current_field < 2 else 80
+                        if len(fields[current_field]["value"]) < max_len:
+                            fields[current_field]["value"] += char
+
+        # Draw dialog
+        screen.blit(background_surface, (0, 0))
+
+        dialog_width = SCREEN_WIDTH - 120
+        dialog_height = 360
+        dialog_rect = pygame.Rect(
+            (SCREEN_WIDTH - dialog_width) // 2,
+            (SCREEN_HEIGHT - dialog_height) // 2,
+            dialog_width,
+            dialog_height,
+        )
+
+        # Background and border
+        pygame.draw.rect(screen, (0, 0, 0), dialog_rect)
+        pygame.draw.rect(screen, (255, 255, 255), dialog_rect, 2)
+
+        # Title
+        title_surface = game_font.render("Session Info", True, (255, 255, 255))
+        title_rect = title_surface.get_rect(center=(SCREEN_WIDTH // 2, dialog_rect.top + 40))
+        screen.blit(title_surface, title_rect)
+
+        # Instructions (wrapped to fit inside the dialog)
+        instructions = "TAB / ENTER to move fields. ENTER on last field to start. ESC to skip."
+        instr_lines = wrap_text(instructions, footer_font, dialog_width - 60)
+        instr_y = title_rect.bottom + 25
+        instructions_bottom = instr_y
+        for line in instr_lines:
+            instr_surface = footer_font.render(line, True, (200, 100, 200))
+            instr_rect = instr_surface.get_rect(center=(SCREEN_WIDTH // 2, instr_y))
+            screen.blit(instr_surface, instr_rect)
+            instructions_bottom = instr_rect.bottom
+            instr_y += instr_surface.get_height() + 4
+
+        # Fields
+        start_y = instructions_bottom + 30
+        line_height = 40
+        for idx, field in enumerate(fields):
+            label_color = (255, 255, 0) if idx == current_field else (200, 200, 200)
+            value_color = (255, 255, 255)
+
+            label_surface = footer_font.render(f"{field['label']}:", True, label_color)
+            base_y = start_y + idx * line_height
+            label_rect = label_surface.get_rect(topleft=(dialog_rect.left + 30, base_y))
+
+            text_value = field["value"] if field["value"] else "_"
+
+            screen.blit(label_surface, label_rect)
+
+            # Wrap comments visually so they don't overflow the dialog
+            if field["label"] == "Comments":
+                wrapped_lines = wrap_text(text_value, footer_font, dialog_width - 260)
+                value_y = base_y
+                for v_line in wrapped_lines:
+                    value_surface = footer_font.render(v_line, True, value_color)
+                    value_rect = value_surface.get_rect(
+                        topleft=(dialog_rect.left + 220, value_y)
+                    )
+                    screen.blit(value_surface, value_rect)
+                    value_y += value_surface.get_height() + 2
+            else:
+                value_surface = footer_font.render(text_value, True, value_color)
+                value_rect = value_surface.get_rect(
+                    topleft=(dialog_rect.left + 220, base_y)
+                )
+                screen.blit(value_surface, value_rect)
+
+        pygame.display.update()
+        clock.tick(30)
+
+    subject_id = fields[0]["value"].strip()
+    simulator_run = fields[1]["value"].strip()
+    comments = fields[2]["value"].strip()
+    return subject_id, simulator_run, comments
+
 def update_score(current_score, current_high_score):
     """Updates the high score persistence variable."""
     if current_score > current_high_score:
@@ -266,28 +437,35 @@ class EventLogger:
     - Key presses
     """
     
-    def __init__(self, filename=None):
+    def __init__(self, subject_id, simulator_run):
+
         """
         Initialize the event logger.
         
         Parameters:
-            filename (str): Optional CSV filename. If None, generates timestamped filename.
+            subject_id (str): Subject ID
+            simulator_run (str): Simulator run
         """
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"data/game_events_{timestamp}.csv"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.filename = f"data/{subject_id}_{simulator_run}_{timestamp}.csv"
         
-        self.filename = filename
         self.attempt_id = 0
         self.csv_file = None
         self.writer = None
-        self.game_start_time = time.time()  # For ms_since_start
+        self.game_start_time = time.time()
+
+        # In-memory debug fields for on-screen display
+        self.last_event_message = None
+        self.last_event_timestamp = 0  # milliseconds since game_start_time
         
         # Create CSV file with headers
         try:
             self.csv_file = open(self.filename, 'w', newline='', encoding='utf-8')
             self.writer = csv.writer(self.csv_file)
-            self.writer.writerow(['datetime', 'timestamp', 'attempt_id', 'event', 'additional_info'])
+            # Columns:
+            #   unix_timestamp: absolute time (seconds since Unix epoch, float)
+            #   timestamp:      ms since game_start_time
+            self.writer.writerow(['unix_timestamp', 'timestamp', 'attempt_id', 'event', 'additional_info'])
             self.csv_file.flush()  # Ensure headers are written immediately
             print(f"Event logging initialized: {self.filename}")
         except Exception as e:
@@ -295,62 +473,74 @@ class EventLogger:
             self.csv_file = None
             self.writer = None
     
-    def log_event(self, event, attempt_id, additional_info=None):
+    def log_event(self, event, additional_info=None):
         """
         Log an event with current timestamp.
         
         Parameters:
             event (str): Type of event (e.g., 'TRIAL_START', 'COLLISION', etc.)
-            attempt_id (int): Unique identifier for the attempt
             additional_info (str): Optional additional information about the event
         """
         if self.writer is None:
             return
         
         try:
-            dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            unix_ts = time.time()
             timestamp = int((time.time() - self.game_start_time) * 1000)
+            info = additional_info if additional_info is not None else ''
+
+            # Persist to CSV
             self.writer.writerow([
-                dt,
+                unix_ts,
                 timestamp,
-                attempt_id,
+                self.attempt_id,
                 event,
-                additional_info if additional_info else ''
+                info
             ])
             self.csv_file.flush()  # Write immediately to prevent data loss
+
+            # Update in-memory debug info for on-screen display
+            if info != '':
+                self.last_event_message = f"Attempt {self.attempt_id}: {event}: {info}"
+            else:
+                self.last_event_message = event
+            self.last_event_timestamp = timestamp
         except Exception as e:
             print(f"Warning: Failed to log event ({e})")
     
-    def log_collision(self, attempt_id, collision_type):
+    def log_collision(self, collision_type):
         """
         Log a collision event.
         
         Parameters:
-            attempt_id (int): Unique identifier for the attempt
             collision_type (str): Type of collision ('pipe' or 'boundary')
         """
-        self.log_event('COLLISION', attempt_id, additional_info=collision_type)
+        self.log_event('COLLISION', additional_info=collision_type)
     
-    def log_pipe_passed(self, attempt_id, score):
+    def log_pipe_passed(self, score):
         """
         Log when bird passes through a pipe.
         
         Parameters:
-            attempt_id (int): Unique identifier for the attempt
             score (int): Current score
         """
-        self.log_event('PIPE_PASSED', attempt_id, additional_info=score)
+        self.log_event('PIPE_PASSED', additional_info=score)
     
-    def log_key_press(self, attempt_id, key_name):
+    def log_key_press(self, key_name):
         """
         Log a key press event.
         
         Parameters:
-            attempt_id (int): Unique identifier for the attempt
             key_name (str): Name of the key pressed
         """
-        self.log_event('KEY_PRESS', attempt_id, additional_info=key_name)
+        self.log_event('KEY_PRESS', additional_info=key_name)
 
+    def log_quit(self):
+        """
+        Log the quit event.
+        """
+        self.log_event('QUIT')
+        
     def close(self):
         """Close the CSV file and finalize logging."""
         if self.csv_file:
@@ -403,7 +593,6 @@ high_score          = 0
 floor_x_position    = 0
 pipe_list           = []
 pipe_height         = [400, 600, 800]
-score_sound_countdown = 100
 
 # ============================================================================
 # ASSET MANAGEMENT
@@ -468,38 +657,46 @@ except Exception as e:
 SPAWNPIPE = pygame.USEREVENT
 pygame.time.set_timer(SPAWNPIPE, PIPE_SPAWN_TIME)
 
+# Bird flap animation timer (cycles wing frames)
 BIRDFLAP = pygame.USEREVENT + 1
 pygame.time.set_timer(BIRDFLAP, 200)
 
-
+previous_game_active = False
 # ============================================================================
 # MAIN LOOP
 # ============================================================================
-def main():
+def main(debug_mode=True):
     """
     The main game loop.
     Handles events, updates game state, and renders the frame.
     """
-    global bird_movement, game_active, score, high_score, bird_index, bird_surface, bird_rectangle, pipe_list, floor_x_position
+    global bird_movement, game_active, score, high_score, bird_index, bird_surface, bird_rectangle, pipe_list, floor_x_position, previous_game_active
     
-    # Initialize event logger
-    logger = EventLogger()
+    # Initialize event logger and collect session metadata
+    subject_id, simulator_run, comments = collect_session_metadata()
+    logger = EventLogger(subject_id, simulator_run)
+    logger.log_event('SESSION_INFO', additional_info=f"subject_id={subject_id};run={simulator_run};comments={comments}")
     
     while True:
         # Event Handling
         for event in pygame.event.get():
+            # New Attempt Mechanic
+            if not previous_game_active and game_active:
+                logger.attempt_id += 1
+                previous_game_active = True
+
             if event.type == pygame.QUIT:
-                # Log trial end if game was active
-                if game_active:
-                    logger.log_trial_end(logger.attempt_id, score)
+                # Log quit event
+                logger.log_quit()
                 logger.close()
                 pygame.quit()
                 sys.exit()
 
             if event.type == pygame.KEYDOWN:
-                # Log all key presses
-                key_name = pygame.key.name(event.key).upper()
-                logger.log_key_press(logger.attempt_id, key_name)
+                # Log key presses
+                if game_active:
+                    key_name = pygame.key.name(event.key).upper()
+                    logger.log_key_press(key_name)
                 
                 # Flap Mechanic
                 if event.key == pygame.K_SPACE and game_active:
@@ -514,12 +711,20 @@ def main():
                     bird_rectangle.center = (100, 512)
                     bird_movement       = 0
                     score               = 0
-                    score_sound_countdown = 100
-                    logger.attempt_id += 1
+                    previous_game_active = False
+
+                # Quit Mechanic
+                if event.key == pygame.K_ESCAPE:
+                    # Log quit event
+                    logger.log_quit()
+                    logger.close()
+                    pygame.quit()
+                    sys.exit()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 # Log mouse clicks as key presses
-                logger.log_key_press(logger.attempt_id, 'MOUSE_CLICK')
+                if game_active:
+                    logger.log_key_press('MOUSE_CLICK')
                 
                 # Flap Mechanic (Mouse)
                 if game_active:
@@ -534,13 +739,13 @@ def main():
                     bird_rectangle.center = (100, 512)
                     bird_movement       = 0
                     score               = 0
-                    score_sound_countdown = 100
-                    logger.attempt_id += 1
+                    previous_game_active = False
                     
             if event.type == SPAWNPIPE:
                 pipe_list.extend(create_pipe())
 
             if event.type == BIRDFLAP:
+                # Cycle through bird animation frames to create a flapping effect
                 if bird_index < 2:
                     bird_index += 1
                 else:
@@ -562,8 +767,10 @@ def main():
             screen.blit(rotated_bird, bird_rectangle)
             
             # 3. Collision Detection
-            collision_result, collision_type = check_collision(pipe_list, logger.attempt_id, logger)
+            collision_result, collision_type = check_collision(pipe_list)
             game_active = collision_result
+            if not game_active:
+                logger.log_collision(collision_type)
 
             # 4. Obstacle Update
             pipe_list = move_pipes(pipe_list)
@@ -576,7 +783,7 @@ def main():
                     score += 0.5 
                     if score % 1 == 0:
                         score_sound.play()
-                        logger.log_pipe_passed(logger.attempt_id, score)
+                        logger.log_pipe_passed(score)
             
             score_display('main_game')
             
@@ -586,6 +793,10 @@ def main():
             screen.blit(game_over_surface, game_over_rectangle)
             high_score = update_score(score, high_score)
             score_display('game_over')
+
+        # Debug overlay: show last logged event in the corner (for a short time)
+        if debug_mode:
+            debug_event_display(logger)
 
         # Floor Animation (Independent of game state for visual polish)
         floor_x_position -= 1
