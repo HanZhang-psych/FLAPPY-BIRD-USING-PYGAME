@@ -51,3 +51,6 @@ Desktop.ini
 
 # Updated
 .conda/
+
+# Don't commit data
+data/
