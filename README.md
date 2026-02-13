@@ -197,6 +197,7 @@ cd FLAPPY-BIRD-USING-PYGAME
 
 # Install Pygame (Community Edition recommended for best performance)
 pip install pygame-ce
+pip install psutil #For process control to launch flappy programmatically
 ```
 
 ### 3. Execution

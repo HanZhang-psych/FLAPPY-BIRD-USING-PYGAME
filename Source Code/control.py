@@ -8,6 +8,7 @@ import os
 REDIS_HOST = '192.168.200.51'
 REDIS_PORT = 6379
 REDIS_KEY = 'game_on'
+REDIS_POLLING_INTERVAL_SECONDS = 1 
 
 def is_main_running(proc):
     return proc and proc.poll() is None
@@ -16,7 +17,7 @@ def stop_process(proc):
     if is_main_running(proc):
         proc.terminate()
         try:
-            proc.wait(timeout=10)
+            proc.wait(timeout=REDIS_POLLING_INTERVAL_SECONDS)
         except subprocess.TimeoutExpired:
             proc.kill()  
             proc.wait()
@@ -47,10 +48,10 @@ def main():
                 stop_process(proc)
                 proc = None
 
-            time.sleep(10)
+            time.sleep(REDIS_POLLING_INTERVAL_SECONDS)
         except Exception as e:
             print(f"Error: {e}")
-            time.sleep(10)
+            time.sleep(REDIS_POLLING_INTERVAL_SECONDS)
 
 if __name__ == '__main__':
     main()
