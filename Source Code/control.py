@@ -7,7 +7,8 @@ import os
 
 REDIS_HOST = '192.168.200.51'
 REDIS_PORT = 6379
-REDIS_KEY = 'game_on'
+REDIS_KEY = 'flappy_bird:game_on'
+REDIS_FLAPPY_HEARTBEAT = 'flappy_bird:heartbeat_time'
 REDIS_POLLING_INTERVAL_SECONDS = 1 
 REDIS_SUBJECT_ID = 'flappy_bird:subject_id'
 REDIS_SIMULATOR_RUN = 'flappy_bird:simulator_run'
@@ -72,11 +73,16 @@ def main():
         try:
             flag = check_redis_flag(r)
 
-            if flag and not is_main_running(proc):
+            proc_is_running = is_main_running(proc)
+
+            if proc_is_running:
+                r.set(REDIS_FLAPPY_HEARTBEAT, time.time())
+
+            if flag and not proc_is_running:
                 print("Flag is True. Starting main.py...")
                 subject_id, simulator_run, comments = get_redis_id_flags(r)
                 proc = run_main_script(subject_id, simulator_run, comments)
-            elif not flag and is_main_running(proc):
+            elif not flag and proc_is_running:
                 print("Flag is False. Stopping main.py...")
                 stop_process(proc)
                 proc = None
