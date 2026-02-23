@@ -21,6 +21,7 @@ import sys
 import random
 import csv
 import time
+import argparse
 from datetime import datetime
 
 # ============================================================================
@@ -330,6 +331,40 @@ def wrap_text(text, font, max_width):
         lines.append(current_line)
 
     return lines
+
+
+def sanitize_text(value, max_len):
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if text.lower() == "none":
+        return ""
+
+    text = text.replace("\r", " ").replace("\n", " ")
+    return text[:max_len]
+
+
+def sanitize_identifier(value, max_len, default_value="unknown"):
+    text = sanitize_text(value, max_len)
+    text = text.replace("/", "-").replace("\\", "-")
+    return text if text else default_value
+
+
+def get_session_metadata_from_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--subject-id", dest="subject_id")
+    parser.add_argument("--simulator-run", dest="simulator_run")
+    parser.add_argument("--comments", dest="comments")
+    args, _ = parser.parse_known_args()
+
+    if args.subject_id is None and args.simulator_run is None and args.comments is None:
+        return None
+
+    subject_id = sanitize_identifier(args.subject_id, 24)
+    simulator_run = sanitize_identifier(args.simulator_run, 24)
+    comments = sanitize_text(args.comments, 200)
+    return subject_id, simulator_run, comments
 
 
 def collect_session_metadata():
@@ -753,7 +788,14 @@ def main():
     global bird_movement, game_active, score, high_score, bird_index, bird_surface, bird_rectangle, pipe_list, floor_x_position, previous_game_active
     
     # Initialize event logger and collect session metadata
-    subject_id, simulator_run, comments = collect_session_metadata()
+    arg_metadata = get_session_metadata_from_args()
+    if arg_metadata is None:
+        subject_id, simulator_run, comments = collect_session_metadata()
+        subject_id = sanitize_identifier(subject_id, 24)
+        simulator_run = sanitize_identifier(simulator_run, 24)
+        comments = sanitize_text(comments, 200)
+    else:
+        subject_id, simulator_run, comments = arg_metadata
     logger = EventLogger(subject_id, simulator_run)
     logger.log_event('SESSION_INFO', additional_info=f"subject_id={subject_id};run={simulator_run};comments={comments}")
     
