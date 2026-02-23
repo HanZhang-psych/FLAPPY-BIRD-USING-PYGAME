@@ -21,19 +21,44 @@ import sys
 import random
 import csv
 import time
-import argparse
 from datetime import datetime
 
 # ============================================================================
 # GLOBAL CONFIGURATION
 # ============================================================================
-SCREEN_WIDTH    = 576
-SCREEN_HEIGHT   = 1024
+DEBUG_MODE      = True
 FPS             = 120
 GRAVITY         = 0.25      # Downward acceleration applied per frame
 FLAP_STRENGTH   = 8         # Upward velocity impulse on flap
 PIPE_SPAWN_TIME = 1200      # Milliseconds between pipe generation
 PIPE_GAP        = 300       # Vertical space between top and bottom pipes
+
+# Base design resolution (used for scaling assets/layout)
+BASE_SCREEN_WIDTH  = 576
+BASE_SCREEN_HEIGHT = 1024
+
+# Base pipe speed in design space (pixels per frame at base resolution)
+BASE_PIPE_SPEED = 4
+
+# Base positions and thresholds in design space (scaled at runtime)
+BASE_BIRD_X              = 100
+BASE_BIRD_Y              = 512
+BASE_SCORE_Y             = 100
+BASE_HIGHSCORE_Y         = 185
+BASE_FLOOR_COLLISION_Y   = 900
+BASE_CEILING_COLLISION_Y = -100
+BASE_PIPE_SPAWN_X        = 700
+BASE_PIPE_HEIGHTS        = [400, 600, 800]
+
+
+def scale_x(x: float) -> int:
+    """Scale an X coordinate from base design space to current screen width."""
+    return int(x * SCREEN_WIDTH / BASE_SCREEN_WIDTH)
+
+
+def scale_y(y: float) -> int:
+    """Scale a Y coordinate from base design space to current screen height."""
+    return int(y * SCREEN_HEIGHT / BASE_SCREEN_HEIGHT)
 
 # ============================================================================
 # CORE LOGIC
@@ -48,8 +73,9 @@ def draw_floor():
         if the first one leaves the screen, it resets to the right, creating
         a seamless loop.
     """
-    screen.blit(floor_surface, (floor_x_position, 900))
-    screen.blit(floor_surface, (floor_x_position + 576, 900))
+    floor_y = SCREEN_HEIGHT - floor_surface.get_height()
+    screen.blit(floor_surface, (floor_x_position, floor_y))
+    screen.blit(floor_surface, (floor_x_position + floor_surface.get_width(), floor_y))
 
     # Render static text on top of the floor
     # Content and Colors
@@ -73,7 +99,8 @@ def draw_floor():
 
     # Starting X Position (Centered)
     current_x = (SCREEN_WIDTH - total_width) // 2
-    text_y = 962
+    # Position text just above the bottom of the screen
+    text_y = SCREEN_HEIGHT - int(62 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT))
     
     # Render Loop
     for surface, shadow, width in surfaces:
@@ -99,12 +126,13 @@ def create_pipe():
         derives the top pipe's position by subtracting the PIPE_GAP.
     """
     random_pipe_position = random.choice(pipe_height)
+    spawn_x = scale_x(BASE_PIPE_SPAWN_X)
     
     # Bottom Pipe: Anchored at midtop position
-    bottom_pipe = pipe_surface.get_rect(midtop=(700, random_pipe_position))
+    bottom_pipe = pipe_surface.get_rect(midtop=(spawn_x, random_pipe_position))
     
     # Top Pipe: Anchored relative to bottom pipe with fixed gap
-    top_pipe = pipe_surface.get_rect(midbottom=(700, random_pipe_position - PIPE_GAP))
+    top_pipe = pipe_surface.get_rect(midbottom=(spawn_x, random_pipe_position - PIPE_GAP))
     
     return bottom_pipe, top_pipe
 
@@ -120,7 +148,7 @@ def move_pipes(pipes):
         list: Updated list of moved pipes.
     """
     for pipe in pipes:
-        pipe.centerx -= 5   # Move pipe leftward by 5 pixels per frame
+        pipe.centerx -= PIPE_SPEED   # Move pipe leftward by scaled pixels per frame
     return pipes
 
 
@@ -132,16 +160,12 @@ def draw_pipes(pipes):
         Iterates through the pipe list. If the pipe is a 'top' pipe
         (determined by its bottom Y coordinate being visible), checking
         logic is simplified here by context or we flip based on position.
-        In this implementation, logic infers orientation:
-        - If pipe bottom is >= 1024 (off screen low? No, Logic checks position).
-        
-        Correction:
-        The logic checks if `pipe.bottom >= 1024`. This condition seems specific
-        to how `create_pipe` sets rectangles. Ideally, distinction should be explicit.
-        Here, we check geometry to decide whether to flip the sprite vertically.
+        In this implementation, logic infers orientation based on geometry:
+        - If the pipe's bottom is at or below the screen bottom, it's a bottom pipe.
+        - Otherwise, it's a top pipe and we flip the sprite vertically.
     """
     for pipe in pipes:
-        if pipe.bottom >= 1024:
+        if pipe.bottom >= SCREEN_HEIGHT:
             # Bottom pipe (Standard orientation)
             screen.blit(pipe_surface, pipe)
         else:
@@ -175,15 +199,18 @@ def check_collision(pipes):
             return False, 'pipe'
 
     # 2. Environmental Collision (Floor/Ceiling)
-    # Thresholds: -100 (Ceiling buffer), 900 (Floor Y-coordinate)
+    # Thresholds scaled from base design space
+    ceiling_threshold = scale_y(BASE_CEILING_COLLISION_Y)
+    floor_threshold   = scale_y(BASE_FLOOR_COLLISION_Y)
+
     # Ceiling Collision
-    if bird_rectangle.top <= -100: 
+    if bird_rectangle.top <= ceiling_threshold:
         if game_active:
              death_sound.play()
              game_active = False
         return False, 'ceiling'
     # Floor Collision
-    if bird_rectangle.bottom >= 900:
+    if bird_rectangle.bottom >= floor_threshold:
         if game_active:
              death_sound.play()
              game_active = False
@@ -217,7 +244,9 @@ def bird_animation():
         tuple: (new_bird_surface, new_bird_rect)
     """
     new_bird = bird_frames[bird_index]
-    new_bird_rectangle = new_bird.get_rect(center=(100, bird_rectangle.centery))
+    new_bird_rectangle = new_bird.get_rect(
+        center=(scale_x(BASE_BIRD_X), bird_rectangle.centery)
+    )
     return new_bird, new_bird_rectangle
 
 
@@ -231,18 +260,24 @@ def score_display(game_state):
     if game_state == 'main_game':
         # Live Score
         score_surface = game_font.render(str(int(score)), True, (255, 255, 255))
-        score_rectangle = score_surface.get_rect(center=(288, 100))
+        score_rectangle = score_surface.get_rect(
+            center=(SCREEN_WIDTH // 2, scale_y(BASE_SCORE_Y))
+        )
         screen.blit(score_surface, score_rectangle)
 
     if game_state == 'game_over':
         # Score Summary
         score_surface = game_font.render(f'Score: {int(score)}', True, (255, 255, 255))
-        score_rectangle = score_surface.get_rect(center=(288, 100))
+        score_rectangle = score_surface.get_rect(
+            center=(SCREEN_WIDTH // 2, scale_y(BASE_SCORE_Y))
+        )
         screen.blit(score_surface, score_rectangle)
 
         # High Score
         high_score_surface = game_font.render(f'High Score: {int(high_score)}', True, (255, 255, 255))
-        high_score_rectangle = high_score_surface.get_rect(center=(288, 185))
+        high_score_rectangle = high_score_surface.get_rect(
+            center=(SCREEN_WIDTH // 2, scale_y(BASE_HIGHSCORE_Y))
+        )
         screen.blit(high_score_surface, high_score_rectangle)
 
 
@@ -259,9 +294,11 @@ def debug_event_display(logger, display_duration_ms=1000):
     if now_ms - logger.last_event_timestamp > display_duration_ms:
         return
 
-    # Prepare text surface
-    text_surface = footer_font.render(logger.last_event_message, True, (255, 255, 0))
-    text_rect = text_surface.get_rect(topleft=(10, 10))
+    # Prepare text surface (use serif font for debug)
+    text_surface = debug_font.render(logger.last_event_message, True, (255, 255, 0))
+    # Offset slightly below the very top edge, scaled with screen height
+    overlay_y = scale_y(40)
+    text_rect = text_surface.get_rect(topleft=(10, overlay_y))
 
     # Draw a simple background box for readability
     bg_rect = text_rect.inflate(10, 6)
@@ -293,40 +330,6 @@ def wrap_text(text, font, max_width):
         lines.append(current_line)
 
     return lines
-
-
-def sanitize_text(value, max_len):
-    if value is None:
-        return ""
-
-    text = str(value).strip()
-    if text.lower() == "none":
-        return ""
-
-    text = text.replace("\r", " ").replace("\n", " ")
-    return text[:max_len]
-
-
-def sanitize_identifier(value, max_len, default_value="unknown"):
-    text = sanitize_text(value, max_len)
-    text = text.replace("/", "-").replace("\\", "-")
-    return text if text else default_value
-
-
-def get_session_metadata_from_args():
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--subject-id", dest="subject_id")
-    parser.add_argument("--simulator-run", dest="simulator_run")
-    parser.add_argument("--comments", dest="comments")
-    args, _ = parser.parse_known_args()
-
-    if args.subject_id is None and args.simulator_run is None and args.comments is None:
-        return None
-
-    subject_id = sanitize_identifier(args.subject_id, 24)
-    simulator_run = sanitize_identifier(args.simulator_run, 24)
-    comments = sanitize_text(args.comments, 200)
-    return subject_id, simulator_run, comments
 
 
 def collect_session_metadata():
@@ -595,8 +598,18 @@ pygame.mixer.pre_init(frequency=44100, size=16, channels=1, buffer=512)
 pygame.init()
 
 # Display Setup
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+display_info = pygame.display.Info()
+SCREEN_WIDTH = display_info.current_w
+SCREEN_HEIGHT = display_info.current_h
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.NOFRAME)
 pygame.display.set_caption("Flappy Bird")
+
+# Sprite scaling factor so assets maintain proportions across resolutions.
+# At the base height (1024), this evaluates to 2.0, matching the original scale2x.
+SPRITE_SCALE = 2.0 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT)
+
+# Pipe speed in pixels per frame, scaled with screen width
+PIPE_SPEED = BASE_PIPE_SPEED * (SCREEN_WIDTH / BASE_SCREEN_WIDTH)
 
 # Icon Setup
 try:
@@ -617,17 +630,21 @@ try:
         # Fallback to lowercase extension (Secondary check)
         game_font = pygame.font.Font('04B_19.ttf', 40)
         footer_font = pygame.font.Font('04B_19.ttf', 20)
+    # Serif font for debug overlay
+    debug_font = pygame.font.SysFont('Times New Roman', 18, bold=True)
 except:
     print("Warning: Custom font not found. Using system font.")
     game_font = pygame.font.SysFont('Arial', 40, bold=True)
     footer_font = pygame.font.SysFont('Arial', 20, bold=True)
+    # Serif debug font fallback
+    debug_font = pygame.font.SysFont('Times New Roman', 18, bold=True)
 bird_movement       = 0
 game_active         = False
 score               = 0
 high_score          = 0
 floor_x_position    = 0
 pipe_list           = []
-pipe_height         = [400, 600, 800]
+pipe_height         = [scale_y(h) for h in BASE_PIPE_HEIGHTS]
 
 # ============================================================================
 # ASSET MANAGEMENT
@@ -636,26 +653,34 @@ pipe_height         = [400, 600, 800]
 try:
     # Textures
     background_surface = pygame.image.load('assets/background-day.png').convert()
-    background_surface = pygame.transform.scale2x(background_surface)
+    background_surface = pygame.transform.scale(background_surface, (SCREEN_WIDTH, SCREEN_HEIGHT))
 
     floor_surface = pygame.image.load('assets/base.png').convert()
-    floor_surface = pygame.transform.scale2x(floor_surface)
-
-    # Bird Animation Frames
-    bird_downflap = pygame.transform.scale2x(pygame.image.load('assets/bluebird-midflap.png').convert_alpha())
-    bird_midflap  = pygame.transform.scale2x(pygame.image.load('assets/bluebird-midflap.png').convert_alpha())
-    bird_upflap   = pygame.transform.scale2x(pygame.image.load('assets/bluebird-midflap.png').convert_alpha())
+    # Floor height scales proportionally with screen height
+    floor_height = int(100 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT))
+    floor_surface = pygame.transform.scale(floor_surface, (SCREEN_WIDTH, floor_height))
+    
+    # Bird Animation Frames (scaled to screen resolution)
+    bird_raw = pygame.image.load('assets/bluebird-midflap.png').convert_alpha()
+    bird_downflap = pygame.transform.rotozoom(bird_raw, 0, SPRITE_SCALE)
+    bird_midflap  = pygame.transform.rotozoom(bird_raw, 0, SPRITE_SCALE)
+    bird_upflap   = pygame.transform.rotozoom(bird_raw, 0, SPRITE_SCALE)
     bird_frames   = [bird_downflap, bird_midflap, bird_upflap]
     bird_index    = 0
     bird_surface  = bird_frames[bird_index]
-    bird_rectangle= bird_surface.get_rect(center=(100, 512))
+    bird_rectangle= bird_surface.get_rect(
+        center=(scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
+    )
 
-    # Obstacles & UI
-    pipe_surface    = pygame.image.load('assets/pipe-green.png')
-    pipe_surface    = pygame.transform.scale2x(pipe_surface)
+    # Obstacles & UI (scaled to screen resolution)
+    pipe_raw       = pygame.image.load('assets/pipe-green.png').convert_alpha()
+    pipe_surface   = pygame.transform.rotozoom(pipe_raw, 0, SPRITE_SCALE)
     
-    game_over_surface   = pygame.transform.scale2x(pygame.image.load('assets/message.png').convert_alpha())
-    game_over_rectangle = game_over_surface.get_rect(center=(288, 512))
+    game_over_raw      = pygame.image.load('assets/message.png').convert_alpha()
+    game_over_surface  = pygame.transform.rotozoom(game_over_raw, 0, SPRITE_SCALE)
+    game_over_rectangle = game_over_surface.get_rect(
+        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    )
 
     # Sound Effects
     flap_sound  = pygame.mixer.Sound('sound/sfx_wing.wav')
@@ -667,16 +692,36 @@ except Exception as e:
     # Fallback Assets (Mock generation)
     background_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
     background_surface.fill((30, 30, 30))
-    floor_surface = pygame.Surface((SCREEN_WIDTH, 100))
+    floor_height = int(100 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT))
+    floor_surface = pygame.Surface((SCREEN_WIDTH, floor_height))
     floor_surface.fill((200, 200, 200))
-    bird_surface = pygame.Surface((34, 24))
+    bird_surface = pygame.Surface(
+        (
+            int(34 * (SCREEN_WIDTH / BASE_SCREEN_WIDTH)),
+            int(24 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT)),
+        )
+    )
     bird_surface.fill((255, 255, 0))
-    bird_rectangle = bird_surface.get_rect(center=(100, 512))
+    bird_rectangle = bird_surface.get_rect(
+        center=(scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
+    )
     bird_frames = [bird_surface]
-    pipe_surface = pygame.Surface((52, 320))
+    pipe_surface = pygame.Surface(
+        (
+            int(52 * (SCREEN_WIDTH / BASE_SCREEN_WIDTH)),
+            int(320 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT)),
+        )
+    )
     pipe_surface.fill((0, 255, 0))
-    game_over_surface = pygame.Surface((200, 50))
-    game_over_rectangle = game_over_surface.get_rect(center=(288, 512))
+    game_over_surface = pygame.Surface(
+        (
+            int(200 * (SCREEN_WIDTH / BASE_SCREEN_WIDTH)),
+            int(50 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT)),
+        )
+    )
+    game_over_rectangle = game_over_surface.get_rect(
+        center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+    )
     
     # Sound Mock
     class MockSound:
@@ -700,7 +745,7 @@ previous_game_active = False
 # ============================================================================
 # MAIN LOOP
 # ============================================================================
-def main(debug_mode=True):
+def main():
     """
     The main game loop.
     Handles events, updates game state, and renders the frame.
@@ -708,14 +753,7 @@ def main(debug_mode=True):
     global bird_movement, game_active, score, high_score, bird_index, bird_surface, bird_rectangle, pipe_list, floor_x_position, previous_game_active
     
     # Initialize event logger and collect session metadata
-    arg_metadata = get_session_metadata_from_args()
-    if arg_metadata is None:
-        subject_id, simulator_run, comments = collect_session_metadata()
-        subject_id = sanitize_identifier(subject_id, 24)
-        simulator_run = sanitize_identifier(simulator_run, 24)
-        comments = sanitize_text(comments, 200)
-    else:
-        subject_id, simulator_run, comments = arg_metadata
+    subject_id, simulator_run, comments = collect_session_metadata()
     logger = EventLogger(subject_id, simulator_run)
     logger.log_event('SESSION_INFO', additional_info=f"subject_id={subject_id};run={simulator_run};comments={comments}")
     
@@ -750,7 +788,7 @@ def main(debug_mode=True):
                 if event.key == pygame.K_SPACE and not game_active:
                     game_active         = True
                     pipe_list.clear() # Reset obstacles
-                    bird_rectangle.center = (100, 512)
+                    bird_rectangle.center = (scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
                     bird_movement       = 0
                     score               = 0
                     previous_game_active = False
@@ -778,7 +816,7 @@ def main(debug_mode=True):
                 else:
                     game_active         = True
                     pipe_list.clear() # Reset obstacles
-                    bird_rectangle.center = (100, 512)
+                    bird_rectangle.center = (scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
                     bird_movement       = 0
                     score               = 0
                     previous_game_active = False
@@ -819,10 +857,13 @@ def main(debug_mode=True):
             draw_pipes(pipe_list)
 
             # 5. Scoring System
-            # Check if bird passed the pipe (Pipe Center X passes 100)
+            # Check if bird passed the pipe: detect when the pipe's center X crosses the bird's X
+            bird_x = scale_x(BASE_BIRD_X)
             for pipe in pipe_list:
-                if pipe.centerx == 100:
-                    score += 0.5 
+                # centerx is AFTER movement this frame; in the previous frame it was centerx + PIPE_SPEED.
+                # We score when the pipe's center moves from right of the bird to left-of-or-equal in one step.
+                if pipe.centerx <= bird_x < pipe.centerx + PIPE_SPEED:
+                    score += 0.5
                     if score % 1 == 0:
                         score_sound.play()
                         logger.log_pipe_passed(score)
@@ -837,13 +878,13 @@ def main(debug_mode=True):
             score_display('game_over')
 
         # Debug overlay: show last logged event in the corner (for a short time)
-        if debug_mode:
+        if DEBUG_MODE:
             debug_event_display(logger)
 
         # Floor Animation (Independent of game state for visual polish)
         floor_x_position -= 1
         draw_floor()
-        if floor_x_position <= -576:
+        if floor_x_position <= -floor_surface.get_width():
             floor_x_position = 0
 
         # Frame Update
