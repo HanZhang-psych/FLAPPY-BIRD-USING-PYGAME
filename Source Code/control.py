@@ -1,7 +1,6 @@
 import time
 import subprocess
 import redis
-import psutil  # for process management
 import sys
 import os
 
@@ -13,6 +12,7 @@ REDIS_POLLING_INTERVAL_SECONDS = 1
 REDIS_SUBJECT_ID = 'flappy_bird:subject_id'
 REDIS_SIMULATOR_RUN = 'flappy_bird:simulator_run'
 REDIS_COMMENTS ='flappy_bird:comments'
+REDIS_TEST_RUN_GUID = 'test_run:guid'
 
 def is_main_running(proc):
     return proc and proc.poll() is None
@@ -26,7 +26,7 @@ def stop_process(proc):
             proc.kill()  
             proc.wait()
 
-def run_main_script(subject_id, simulator_run, comments):
+def run_main_script(subject_id, simulator_run, comments, test_run_guid):
     def to_arg(value):
         if value is None:
             return ""
@@ -43,6 +43,8 @@ def run_main_script(subject_id, simulator_run, comments):
         to_arg(simulator_run),
         "--comments",
         to_arg(comments),
+        "--test-run-guid",
+        to_arg(test_run_guid),
     ]
     return subprocess.Popen(args, cwd=os.path.dirname(__file__))
 
@@ -57,12 +59,14 @@ def get_redis_id_flags(r):
     subject_id = r.get(REDIS_SUBJECT_ID)
     simulator_run = r.get(REDIS_SIMULATOR_RUN)
     comments = r.get(REDIS_COMMENTS)
+    test_run_guid = r.get(REDIS_TEST_RUN_GUID)
 
     print(f"Subject ID: {subject_id.decode('utf-8') if subject_id else 'None'}")
     print(f"Simulator Run: {simulator_run.decode('utf-8') if simulator_run else 'None'}")
     print(f"Comments: {comments.decode('utf-8') if comments else 'None'}")
+    print(f"Test Run GUID: {test_run_guid.decode('utf-8') if test_run_guid else 'None'}")
 
-    return subject_id, simulator_run, comments
+    return subject_id, simulator_run, comments, test_run_guid
 
 
 def main():
@@ -80,8 +84,8 @@ def main():
 
             if flag and not proc_is_running:
                 print("Flag is True. Starting main.py...")
-                subject_id, simulator_run, comments = get_redis_id_flags(r)
-                proc = run_main_script(subject_id, simulator_run, comments)
+                subject_id, simulator_run, comments, test_run_guid = get_redis_id_flags(r)
+                proc = run_main_script(subject_id, simulator_run, comments, test_run_guid)
             elif not flag and proc_is_running:
                 print("Flag is False. Stopping main.py...")
                 stop_process(proc)
