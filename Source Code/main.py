@@ -365,15 +365,22 @@ def get_session_metadata_from_args():
     parser.add_argument("--subject-id", dest="subject_id")
     parser.add_argument("--simulator-run", dest="simulator_run")
     parser.add_argument("--comments", dest="comments")
+    parser.add_argument("--test-run-guid", dest="test_run_guid")
     args, _ = parser.parse_known_args()
 
-    if args.subject_id is None and args.simulator_run is None and args.comments is None:
+    if (
+        args.subject_id is None
+        and args.simulator_run is None
+        and args.comments is None
+        and args.test_run_guid is None
+    ):
         return None
 
     subject_id = sanitize_identifier(args.subject_id, 24)
     simulator_run = sanitize_identifier(args.simulator_run, 24)
     comments = sanitize_text(args.comments, 200)
-    return subject_id, simulator_run, comments
+    test_run_guid = sanitize_identifier(args.test_run_guid, 64)
+    return subject_id, simulator_run, comments, test_run_guid
 
 
 def collect_session_metadata():
@@ -519,7 +526,7 @@ class EventLogger:
     - Key presses
     """
     
-    def __init__(self, subject_id, simulator_run):
+    def __init__(self, subject_id, simulator_run, test_run_guid):
 
         """
         Initialize the event logger.
@@ -527,10 +534,11 @@ class EventLogger:
         Parameters:
             subject_id (str): Subject ID
             simulator_run (str): Simulator run
+            test_run_guid (str): Test run GUID
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         os.makedirs(resource_path('data'), exist_ok=True)
-        self.filename = resource_path('data', f"{subject_id}_{simulator_run}_{timestamp}.csv")
+        self.filename = resource_path('data', f"{subject_id}_{simulator_run}_{test_run_guid}_{timestamp}.csv")
         
         self.attempt_id = 0
         self.csv_file = None
@@ -805,10 +813,11 @@ def main():
         subject_id = sanitize_identifier(subject_id, 24)
         simulator_run = sanitize_identifier(simulator_run, 24)
         comments = sanitize_text(comments, 200)
+        test_run_guid = sanitize_identifier(None, 64)
     else:
-        subject_id, simulator_run, comments = arg_metadata
-    logger = EventLogger(subject_id, simulator_run)
-    logger.log_event('SESSION_INFO', additional_info=f"subject_id={subject_id};run={simulator_run};comments={comments}")
+        subject_id, simulator_run, comments, test_run_guid = arg_metadata
+    logger = EventLogger(subject_id, simulator_run, test_run_guid)
+    logger.log_event('SESSION_INFO', additional_info=f"subject_id={subject_id};run={simulator_run};test_run_guid={test_run_guid};comments={comments}")
     
     while True:
         # Event Handling
