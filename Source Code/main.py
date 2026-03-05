@@ -22,7 +22,16 @@ import random
 import csv
 import time
 import argparse
+import os
 from datetime import datetime
+
+
+# Resolve all resource paths relative to this script so running from repo root works.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def resource_path(*parts):
+    return os.path.join(BASE_DIR, *parts)
 
 # ============================================================================
 # GLOBAL CONFIGURATION
@@ -520,7 +529,8 @@ class EventLogger:
             simulator_run (str): Simulator run
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.filename = f"data/{subject_id}_{simulator_run}_{timestamp}.csv"
+        os.makedirs(resource_path('data'), exist_ok=True)
+        self.filename = resource_path('data', f"{subject_id}_{simulator_run}_{timestamp}.csv")
         
         self.attempt_id = 0
         self.csv_file = None
@@ -648,7 +658,7 @@ PIPE_SPEED = BASE_PIPE_SPEED * (SCREEN_WIDTH / BASE_SCREEN_WIDTH)
 
 # Icon Setup
 try:
-    icon_surface = pygame.image.load('favicon.png')
+    icon_surface = pygame.image.load(resource_path('favicon.png'))
     pygame.display.set_icon(icon_surface)
 except Exception as e:
     print(f"Warning: Could not load icon ({e})")
@@ -659,12 +669,12 @@ clock = pygame.time.Clock()
 try:
     try:
         # Try finding the font with uppercase extension (Primary check)
-        game_font = pygame.font.Font('04B_19.TTF', 40)
-        footer_font = pygame.font.Font('04B_19.TTF', 20)
+        game_font = pygame.font.Font(resource_path('04B_19.TTF'), 40)
+        footer_font = pygame.font.Font(resource_path('04B_19.TTF'), 20)
     except:
         # Fallback to lowercase extension (Secondary check)
-        game_font = pygame.font.Font('04B_19.ttf', 40)
-        footer_font = pygame.font.Font('04B_19.ttf', 20)
+        game_font = pygame.font.Font(resource_path('04B_19.ttf'), 40)
+        footer_font = pygame.font.Font(resource_path('04B_19.ttf'), 20)
     # Serif font for debug overlay
     debug_font = pygame.font.SysFont('Times New Roman', 18, bold=True)
 except:
@@ -687,16 +697,16 @@ pipe_height         = [scale_y(h) for h in BASE_PIPE_HEIGHTS]
 
 try:
     # Textures
-    background_surface = pygame.image.load('assets/background-day.png').convert()
+    background_surface = pygame.image.load(resource_path('assets', 'background-day.png')).convert()
     background_surface = pygame.transform.scale(background_surface, (SCREEN_WIDTH, SCREEN_HEIGHT))
 
-    floor_surface = pygame.image.load('assets/base.png').convert()
+    floor_surface = pygame.image.load(resource_path('assets', 'base.png')).convert()
     # Floor height scales proportionally with screen height
     floor_height = int(100 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT))
     floor_surface = pygame.transform.scale(floor_surface, (SCREEN_WIDTH, floor_height))
     
     # Bird Animation Frames (scaled to screen resolution)
-    bird_raw = pygame.image.load('assets/bluebird-midflap.png').convert_alpha()
+    bird_raw = pygame.image.load(resource_path('assets', 'bluebird-midflap.png')).convert_alpha()
     bird_downflap = pygame.transform.rotozoom(bird_raw, 0, SPRITE_SCALE)
     bird_midflap  = pygame.transform.rotozoom(bird_raw, 0, SPRITE_SCALE)
     bird_upflap   = pygame.transform.rotozoom(bird_raw, 0, SPRITE_SCALE)
@@ -708,19 +718,19 @@ try:
     )
 
     # Obstacles & UI (scaled to screen resolution)
-    pipe_raw       = pygame.image.load('assets/pipe-green.png').convert_alpha()
+    pipe_raw       = pygame.image.load(resource_path('assets', 'pipe-green.png')).convert_alpha()
     pipe_surface   = pygame.transform.rotozoom(pipe_raw, 0, SPRITE_SCALE)
     
-    game_over_raw      = pygame.image.load('assets/message.png').convert_alpha()
+    game_over_raw      = pygame.image.load(resource_path('assets', 'message.png')).convert_alpha()
     game_over_surface  = pygame.transform.rotozoom(game_over_raw, 0, SPRITE_SCALE)
     game_over_rectangle = game_over_surface.get_rect(
         center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
     )
 
     # Sound Effects
-    flap_sound  = pygame.mixer.Sound('sound/sfx_wing.wav')
-    death_sound = pygame.mixer.Sound('sound/sfx_hit.wav')
-    score_sound = pygame.mixer.Sound('sound/sfx_point.wav')
+    flap_sound  = pygame.mixer.Sound(resource_path('sound', 'sfx_wing.wav'))
+    death_sound = pygame.mixer.Sound(resource_path('sound', 'sfx_hit.wav'))
+    score_sound = pygame.mixer.Sound(resource_path('sound', 'sfx_point.wav'))
 
 except Exception as e:
     print(f"CRITICAL ERROR: Asset loading failed ({e}). Playing in fallback mode.")
@@ -741,6 +751,7 @@ except Exception as e:
         center=(scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
     )
     bird_frames = [bird_surface]
+    bird_index = 0
     pipe_surface = pygame.Surface(
         (
             int(52 * (SCREEN_WIDTH / BASE_SCREEN_WIDTH)),
@@ -868,10 +879,7 @@ def main():
 
             if event.type == BIRDFLAP:
                 # Cycle through bird animation frames to create a flapping effect
-                if bird_index < 2:
-                    bird_index += 1
-                else:
-                    bird_index = 0
+                bird_index = (bird_index + 1) % len(bird_frames)
                 bird_surface, bird_rectangle = bird_animation()
 
         # Render Background
