@@ -9,10 +9,10 @@ REDIS_PORT = 6379
 REDIS_KEY = 'flappy_bird:game_on'
 REDIS_FLAPPY_HEARTBEAT = 'flappy_bird:heartbeat_time'
 REDIS_POLLING_INTERVAL_SECONDS = 1 
-REDIS_SUBJECT_ID = 'flappy_bird:subject_id'
-REDIS_SIMULATOR_RUN = 'flappy_bird:simulator_run'
-REDIS_COMMENTS ='flappy_bird:comments'
-REDIS_TEST_RUN_GUID = 'test_run:guid'
+REDIS_SUBJECT_ID = 'metadata:subject_id'
+REDIS_SIMULATOR_RUN = 'metadata:simulator_run'
+REDIS_COMMENTS ='metadata:comments'
+REDIS_TEST_RUN_GUID = 'metadata:guid'
 
 def is_main_running(proc):
     return proc and proc.poll() is None
