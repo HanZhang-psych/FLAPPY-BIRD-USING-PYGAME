@@ -36,19 +36,19 @@ def resource_path(*parts):
 # ============================================================================
 # GLOBAL CONFIGURATION
 # ============================================================================
-DEBUG_MODE      = True
+DEBUG_MODE      = False
 FPS             = 120
 GRAVITY         = 0.25      # Downward acceleration applied per frame
 FLAP_STRENGTH   = 8         # Upward velocity impulse on flap
-PIPE_SPAWN_TIME = 1200      # Milliseconds between pipe generation
-PIPE_GAP        = 300       # Vertical space between top and bottom pipes
+PIPE_SPAWN_TIME = 2500      # Milliseconds between pipe generation
+PIPE_GAP        = 320       # Vertical space between top and bottom pipes
 
 # Base design resolution (used for scaling assets/layout)
 BASE_SCREEN_WIDTH  = 576
 BASE_SCREEN_HEIGHT = 1024
 
 # Base pipe speed in design space (pixels per frame at base resolution)
-BASE_PIPE_SPEED = 4
+BASE_PIPE_SPEED = 1.2
 
 # Base positions and thresholds in design space (scaled at runtime)
 BASE_BIRD_X              = 100
@@ -705,10 +705,10 @@ pipe_height         = [scale_y(h) for h in BASE_PIPE_HEIGHTS]
 
 try:
     # Textures
-    background_surface = pygame.image.load(resource_path('assets', 'background-day.png')).convert()
+    background_surface = pygame.image.load(resource_path('assets', 'background-twilight.png')).convert()
     background_surface = pygame.transform.scale(background_surface, (SCREEN_WIDTH, SCREEN_HEIGHT))
 
-    floor_surface = pygame.image.load(resource_path('assets', 'base.png')).convert()
+    floor_surface = pygame.image.load(resource_path('assets', 'base-frost.png')).convert()
     # Floor height scales proportionally with screen height
     floor_height = int(100 * (SCREEN_HEIGHT / BASE_SCREEN_HEIGHT))
     floor_surface = pygame.transform.scale(floor_surface, (SCREEN_WIDTH, floor_height))
@@ -726,10 +726,10 @@ try:
     )
 
     # Obstacles & UI (scaled to screen resolution)
-    pipe_raw       = pygame.image.load(resource_path('assets', 'pipe-green.png')).convert_alpha()
+    pipe_raw       = pygame.image.load(resource_path('assets', 'pipe-red.png')).convert_alpha()
     pipe_surface   = pygame.transform.rotozoom(pipe_raw, 0, SPRITE_SCALE)
     
-    game_over_raw      = pygame.image.load(resource_path('assets', 'message.png')).convert_alpha()
+    game_over_raw      = pygame.image.load(resource_path('assets', 'message-2.png')).convert_alpha()
     game_over_surface  = pygame.transform.rotozoom(game_over_raw, 0, SPRITE_SCALE)
     game_over_rectangle = game_over_surface.get_rect(
         center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
@@ -739,6 +739,7 @@ try:
     flap_sound  = pygame.mixer.Sound(resource_path('sound', 'sfx_wing.wav'))
     death_sound = pygame.mixer.Sound(resource_path('sound', 'sfx_hit.wav'))
     score_sound = pygame.mixer.Sound(resource_path('sound', 'sfx_point.wav'))
+
 
 except Exception as e:
     print(f"CRITICAL ERROR: Asset loading failed ({e}). Playing in fallback mode.")
