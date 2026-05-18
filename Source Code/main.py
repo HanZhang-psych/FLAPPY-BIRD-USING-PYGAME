@@ -39,8 +39,8 @@ def resource_path(*parts):
 DEBUG_MODE      = False
 FPS             = 120
 GRAVITY         = 0.25      # Downward acceleration applied per frame
-FLAP_STRENGTH   = 8         # Upward velocity impulse on flap
-PIPE_SPAWN_TIME = 2500      # Milliseconds between pipe generation
+FLAP_STRENGTH   = 6         # Upward velocity impulse on flap
+PIPE_SPAWN_TIME = 2000      # Milliseconds between pipe generation
 PIPE_GAP        = 320       # Vertical space between top and bottom pipes
 
 # Base design resolution (used for scaling assets/layout)
@@ -852,7 +852,9 @@ def main():
                     game_active         = True
                     pipe_list.clear() # Reset obstacles
                     bird_rectangle.center = (scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
-                    bird_movement       = 0
+                    # Give the bird an initial upward "tap" so it has momentum on restart
+                    bird_movement       = -FLAP_STRENGTH
+                    flap_sound.play()
                     score               = 0
                     previous_game_active = False
 
@@ -880,7 +882,9 @@ def main():
                     game_active         = True
                     pipe_list.clear() # Reset obstacles
                     bird_rectangle.center = (scale_x(BASE_BIRD_X), scale_y(BASE_BIRD_Y))
-                    bird_movement       = 0
+                    # Give the bird an initial upward "tap" so it has momentum on restart
+                    bird_movement       = -FLAP_STRENGTH
+                    flap_sound.play()
                     score               = 0
                     previous_game_active = False
                     
